@@ -1,5 +1,7 @@
 package com.leonematias.randonForest
 
+import java.io.{BufferedWriter, File, FileWriter}
+
 import com.leonematias.common.Utils
 import org.apache.spark.ml.classification.RandomForestClassifier
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
@@ -9,17 +11,22 @@ import org.apache.spark.sql.DataFrame
 
 object TitanicRandomForest {
 
+  val basePath = "src/main/resources/data/"
+  val randSeed: Long = 123456
+  val labelColOrig = "Survived"
+  val labelCol = "SurvivedIndexed"
+
+
   def main(args: Array[String]): Unit = {
-    val randSeed: Long = 123456
-    val labelColOrig = "Survived"
-    val labelCol = "SurvivedIndexed"
+    //trainAndEvaluateWithTrainSet()
+    trainAndPredictTestSet()
+  }
 
-
+  def trainAndEvaluateWithTrainSet() = {
     val spark = Utils.initSpark()
 
-    val basePath = "src/main/resources/data/"
+    //Load data
     val origTrainData = Utils.loadCsvDataFrame(spark, basePath + "titanic_train.csv", ",")
-    //val testData = Utils.loadCsvDataFrame(spark, basePath + "titanic_test.csv", ",")
 
     //Split in test and train
     val dataSplit = randomSplitWithStratifiedKFold(origTrainData, labelColOrig, Array(0, 1), 0.8, randSeed)
@@ -55,8 +62,46 @@ object TitanicRandomForest {
     //Show some prediction samples
     predictions.select("Age", "Embarked", "Sex", "Pclass", "SibSp", "Parch", "Survived", "prediction", "probability")
       .show(50)
-
   }
+
+
+  def trainAndPredictTestSet() = {
+    val spark = Utils.initSpark()
+
+    //Load data
+    val trainData = Utils.loadCsvDataFrame(spark, basePath + "titanic_train.csv", ",")
+    val testData = Utils.loadCsvDataFrame(spark, basePath + "titanic_test.csv", ",")
+
+    //Clean data
+    val trainDataCleaned = cleanData(trainData)
+    val testDataCleaned = cleanData(testData)
+
+    //Train classifier
+    val classifier = new RandomForestClassifier()
+      .setLabelCol(labelCol)
+      .setFeaturesCol("Features")
+      .setNumTrees(1000)
+    val model = classifier.fit(trainDataCleaned)
+
+    //Predict test data
+    val predictions = model.transform(testDataCleaned)
+
+    //Print predictions
+    val rows = predictions.select("PassengerId", "prediction").collect()
+    val out = new BufferedWriter(new FileWriter(new File(basePath + "titanic_test_predictions.csv")))
+    out.write("PassengerId,Survived")
+    rows.foreach{r =>
+      out.newLine()
+      out.write(r(0).toString)
+      out.write(",")
+      out.write(r(1).asInstanceOf[Double].toInt.toString)
+    }
+    out.close()
+  }
+
+
+
+
 
   def cleanData(origData: DataFrame): DataFrame = {
     var df: DataFrame = origData
